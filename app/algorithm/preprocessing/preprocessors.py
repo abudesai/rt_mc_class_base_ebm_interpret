@@ -6,7 +6,7 @@ from sklearn.preprocessing import LabelEncoder, QuantileTransformer, MinMaxScale
 
 from sklearn.base import BaseEstimator, TransformerMixin
 
-
+    
 class DropNATransformer(BaseEstimator, TransformerMixin):  
     ''' Scale ratings '''
     def __init__(self, cols_list): 
@@ -70,7 +70,6 @@ class ColumnSelector(BaseEstimator, TransformerMixin):
     
     
     def transform(self, X):   
-        
         if self.selector_type == 'keep':
             retained_cols = [col for col in X.columns if col in self.columns]
             X = X[retained_cols].copy()
@@ -81,7 +80,7 @@ class ColumnSelector(BaseEstimator, TransformerMixin):
             raise Exception(f'''
                 Error: Invalid selector_type. 
                 Allowed values ['keep', 'drop']
-                Given type = {self.selector_type} ''')   
+                Given type = {self.selector_type} ''')          
         return X
     
     
@@ -245,7 +244,7 @@ class MinMaxBounder(BaseEstimator, TransformerMixin):
         
         df = pd.DataFrame(bounded_data, columns=self.cols_list)
         final_data = pd.concat([other_data, df], ignore_index=True, axis=1)
-        final_data.columns = other_cols + self.cols_list        
+        final_data.columns = other_cols + self.cols_list    
         
         return final_data
     
@@ -276,7 +275,7 @@ class CustomLabelBinarizer(BaseEstimator, TransformerMixin):
         # sort so that the target class is last
         given_classes.sort(key = lambda k: k == self.target_class)
         # save for transformation
-        self.given_classes = given_classes
+        self.given_classes = given_classes 
         return self 
     
     
@@ -302,7 +301,7 @@ class TargetFeatureAdder(BaseEstimator, TransformerMixin):
     
     def transform(self, data): 
         if self.label_field_name not in data.columns: 
-            data[self.label_field_name] = 0.
+            data[self.label_field_name] = "__dummy__"
         return data
 
 
@@ -357,10 +356,11 @@ class CustomLabelEncoder(BaseEstimator, TransformerMixin):
     
     
     def transform(self, data): 
-        if self.target_col in data.columns:           
+        if self.target_col in data.columns and data[self.target_col].values[0] != "__dummy__": 
+            # data[self.target_col] = self.le.transform(data[self.target_col])            
             le_dict = dict(zip(self.classes_, self.le.transform(self.classes_)))
             data[self.target_col] = data[self.target_col].apply(lambda x: le_dict.get(x, "__UNK__"))
-            data = data[data[self.target_col] != "__UNK__"]
+            data = data[data[self.target_col] != "__UNK__"]   
         return data
     
     
@@ -381,5 +381,5 @@ class XYSplitter(BaseEstimator, TransformerMixin):
         not_X_cols = [ self.id_col, self.target_col ] 
         X_cols = [ col for col in data.columns if col not in not_X_cols ]        
         X = data[X_cols]   
-        ids = data[self.id_col]        
-        return { 'X': X, 'y': y, "ids":ids.values }
+        ids = data[self.id_col].values   
+        return { 'X': X, 'y': y, "ids":ids  }
