@@ -71,6 +71,31 @@ class ModelServer:
         preds_df.drop(class_names, axis=1, inplace=True)
         return preds_df
 
+    def predict_to_json(self, data): 
+        predictions_df = self.predict_proba(data)
+        predictions_df.columns = [str(c) for c in predictions_df.columns]
+        class_names = predictions_df.columns[1:]
+
+        predictions_df["__label"] = pd.DataFrame(
+            predictions_df[class_names], columns=class_names
+        ).idxmax(axis=1)
+
+        # convert to the json response specification
+        id_field_name = self.id_field_name
+        predictions_response = []
+        for rec in predictions_df.to_dict(orient="records"):
+            pred_obj = {}
+            pred_obj[id_field_name] = rec[id_field_name]
+            pred_obj["label"] = rec["__label"]
+            pred_obj["probabilities"] = {
+                str(k): np.round(v, 5)
+                for k, v in rec.items()
+                if k not in [id_field_name, "__label"]
+            }
+            predictions_response.append(pred_obj)
+        return predictions_response
+
+
     def explain_local(self, data):
         if data.shape[0] > self.MAX_LOCAL_EXPLANATIONS:
             msg = f"""Warning!
@@ -85,39 +110,45 @@ class ModelServer:
         preprocessor = self._get_preprocessor()
         proc_data = preprocessor.transform(data)
         pred_X, ids = proc_data["X"].astype(np.float), proc_data["ids"]
+        class_names = pipeline.get_class_names(preprocessor, model_cfg)
 
         model = self._get_model()
+        pred_probabilities = np.round(model.predict_proba(pred_X), 5)
 
         local_explanations = model.explain_local(pred_X)
 
-        class_names = pipeline.get_class_names(self.preprocessor, model_cfg)
-        all_explanations = []
+        explanations = []
         for i in range(pred_X.shape[0]):
-            local_expl_data = local_explanations.data(i)
-            sample_expl_dict = {}
-            sample_expl_dict[self.id_field_name] = ids[i]
-            sample_expl_dict["predicted_class"] = str(
-                class_names[int(local_expl_data["perf"]["predicted"])]
-            )
-            sample_expl_dict["predicted_class_prob"] = np.round(
-                local_expl_data["perf"]["predicted_score"], 4
-            )
 
-            sample_expl_dict["feature_impacts_per_class"] = {}
+            probabilities = {
+                k:v for k,v in zip(class_names, pred_probabilities[i])
+            }
+            
+            local_expl_data = local_explanations.data(i)
+
+            sample_expl_dict = {}
+
             for j, c in enumerate(class_names):
                 class_exp_dict = {}
-                class_exp_dict["Intercept"] = local_expl_data["extra"]["scores"][0][j]
+                class_exp_dict["Intercept"] = np.round(local_expl_data["extra"]["scores"][0][j], 5)
 
                 feature_impacts = {
-                    f: np.round(v[j], 4)
+                    f: np.round(v[j], 5)
                     for f, v in zip(local_expl_data["names"], local_expl_data["scores"])
                 }
-                class_exp_dict["feature_impacts"] = feature_impacts
+                class_exp_dict["feature_scores"] = feature_impacts
 
-                sample_expl_dict["feature_impacts_per_class"][str(c)] = class_exp_dict
+                sample_expl_dict[str(c)] = class_exp_dict
 
-            all_explanations.append(sample_expl_dict)
+            explanations.append({
+                self.id_field_name: ids[i],
+                "label": str( class_names[int(local_expl_data["perf"]["predicted"])] ),
+                "label_prob": np.round( local_expl_data["perf"]["predicted_score"], 5 ),
+                "probabilities": probabilities,
+                "explanations": sample_expl_dict
+            })
             # pprint.pprint(sample_expl_dict)
         # ------------------------------------------------------
-        all_explanations = json.dumps(all_explanations, cls=utils.NpEncoder, indent=2)
-        return all_explanations
+        explanations = {"predictions": explanations}
+        explanations = json.dumps(explanations, cls=utils.NpEncoder, indent=2)
+        return explanations
